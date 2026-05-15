@@ -1,0 +1,50 @@
+======================================================================
+ SOC NETWORK TRAFFIC ANALYSIS REPORT
+ 2026-05-15 15:22:52
+======================================================================
+ File           : sample_capture.pcap
+ Total packets  : 102
+ Unique src IPs : 24
+ Unique dst IPs : 4
+ Protocol breakdown:
+   TCP   : 42 packets
+   UDP   : 60 packets
+======================================================================
+ [1] PORT SCAN DETECTION
+----------------------------------------------------------------------
+ [!] ALERT -- Port scan detected from: 192.168.1.105
+     Unique destination ports : 16
+     Ports scanned            : [21, 22, 23, 25, 53, 80, 110, 135, 139, 443, 445, 3306, 3389, 5900, 8080, 8443]
+     MITRE                    : T1046 -- Network Service Scanning
+
+ [2] SUSPICIOUS PORT CONNECTIONS
+----------------------------------------------------------------------
+ [!] ALERT -- 10.0.0.50 -> 185.220.101.45:4444/TCP
+     Reason : Metasploit default listener
+     MITRE  : T1071 -- Application Layer Protocol (C2)
+ [!] ALERT -- 10.0.0.50 -> 185.220.101.45:4444/TCP
+     Reason : Metasploit default listener
+     MITRE  : T1071 -- Application Layer Protocol (C2)
+ [!] ALERT -- 10.0.0.50 -> 185.220.101.45:4444/TCP
+     Reason : Metasploit default listener
+     MITRE  : T1071 -- Application Layer Protocol (C2)
+ [!] ALERT -- 10.0.0.50 -> 185.220.101.45:4444/TCP
+     Reason : Metasploit default listener
+     MITRE  : T1071 -- Application Layer Protocol (C2)
+ [!] ALERT -- 10.0.0.50 -> 185.220.101.45:4444/TCP
+     Reason : Metasploit default listener
+     MITRE  : T1071 -- Application Layer Protocol (C2)
+ [!] ALERT -- 192.168.1.200 -> 91.108.4.167:6667/TCP
+     Reason : IRC / botnet communication
+     MITRE  : T1071 -- Application Layer Protocol (C2)
+
+ [3] HIGH VOLUME / FLOOD DETECTION
+----------------------------------------------------------------------
+ [!] ALERT -- High packet volume from: 10.0.0.77
+     Packets : 60
+     MITRE   : T1498 -- Network Denial of Service
+
+======================================================================
+ VERDICT : HIGH -- Escalate to Tier 2 immediately
+ ALERTS  : 8 anomalies detected
+======================================================================
