@@ -22,6 +22,8 @@ except ImportError:
     print("[!] scapy not installed. Run: python -m pip install scapy")
     sys.exit(1)
 
+from baseline_profile import load_profile, zscore, BASELINE_PROFILE_FILE
+
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
@@ -36,8 +38,9 @@ SUSPICIOUS_PORTS = {
     8888:  "Common malware C2",
 }
 
-PORT_SCAN_THRESHOLD  = 10   # unique dst ports from one IP triggers port scan alert
-HIGH_VOLUME_THRESHOLD = 50  # packets from one IP triggers flood alert
+PORT_SCAN_THRESHOLD  = 10   # unique dst ports from one IP triggers port scan alert (fixed-threshold mode)
+HIGH_VOLUME_THRESHOLD = 50  # packets from one IP triggers flood alert (fixed-threshold mode)
+ANOMALY_Z_THRESHOLD = 3.0   # standard deviations from baseline mean to flag (baseline mode)
 SEP = "=" * 70
 
 
@@ -95,8 +98,15 @@ def generate_sample_pcap(output_file="sample_capture.pcap"):
 
 # ── Analysis Engine ────────────────────────────────────────────────────────────
 
-def analyze_pcap(pcap_file):
-    """Load and analyze a PCAP file. Returns a findings dictionary."""
+def analyze_pcap(pcap_file, baseline=None):
+    """Load and analyze a PCAP file. Returns a findings dictionary.
+
+    If `baseline` (a profile dict from baseline_profile.py) is provided,
+    flood and port-scan detection additionally run in statistical mode:
+    an IP is flagged when its packet count or port diversity is more than
+    ANOMALY_Z_THRESHOLD standard deviations above the baseline mean,
+    instead of relying only on a fixed number tuned for one network.
+    """
     print(f"[*] Loading: {pcap_file}")
     try:
         packets = rdpcap(pcap_file)
@@ -117,6 +127,9 @@ def analyze_pcap(pcap_file):
         "port_scan_suspects":   {},
         "high_volume_ips":      {},
         "suspicious_port_hits": [],
+        "anomaly_flood_ips":    {},
+        "anomaly_scan_ips":     {},
+        "baseline_used":        baseline is not None,
     }
 
     for pkt in packets:
@@ -161,6 +174,23 @@ def analyze_pcap(pcap_file):
         if count >= HIGH_VOLUME_THRESHOLD:
             findings["high_volume_ips"][ip] = count
 
+    # Statistical anomaly detection, only when a baseline profile is supplied
+    if baseline:
+        pkt_mean = baseline["packets_per_ip"]["mean"]
+        pkt_stdev = baseline["packets_per_ip"]["stdev"]
+        port_mean = baseline["ports_per_ip"]["mean"]
+        port_stdev = baseline["ports_per_ip"]["stdev"]
+
+        for ip, count in findings["ip_packet_counts"].items():
+            z = zscore(count, pkt_mean, pkt_stdev)
+            if z >= ANOMALY_Z_THRESHOLD:
+                findings["anomaly_flood_ips"][ip] = {"packets": count, "z_score": round(z, 2)}
+
+        for ip, ports in findings["ip_dst_ports"].items():
+            z = zscore(len(ports), port_mean, port_stdev)
+            if z >= ANOMALY_Z_THRESHOLD:
+                findings["anomaly_scan_ips"][ip] = {"unique_ports": len(ports), "z_score": round(z, 2)}
+
     return findings
 
 
@@ -174,7 +204,9 @@ def generate_report(findings, output_file="report_output.txt"):
     total_alerts = (
         len(findings["suspicious_port_hits"]) +
         len(findings["port_scan_suspects"])    +
-        len(findings["high_volume_ips"])
+        len(findings["high_volume_ips"])       +
+        len(findings["anomaly_flood_ips"])     +
+        len(findings["anomaly_scan_ips"])
     )
     severity = "HIGH" if total_alerts >= 3 else "MEDIUM" if total_alerts >= 1 else "LOW"
 
@@ -234,6 +266,26 @@ def generate_report(findings, output_file="report_output.txt"):
         lines.append(" [OK] No high-volume flood activity detected.")
     lines.append("")
 
+    # Section 4 -- Statistical anomaly detection (baseline mode only)
+    if findings["baseline_used"]:
+        lines += [" [4] STATISTICAL ANOMALY DETECTION (baseline z-score)", "-" * 70]
+        if findings["anomaly_flood_ips"] or findings["anomaly_scan_ips"]:
+            for ip, data in findings["anomaly_flood_ips"].items():
+                lines += [
+                    f" [!] ALERT -- Packet volume anomaly from: {ip}",
+                    f"     Packets   : {data['packets']}  (z-score: {data['z_score']}, threshold: {ANOMALY_Z_THRESHOLD})",
+                    f"     MITRE     : T1498 -- Network Denial of Service",
+                ]
+            for ip, data in findings["anomaly_scan_ips"].items():
+                lines += [
+                    f" [!] ALERT -- Port diversity anomaly from: {ip}",
+                    f"     Ports     : {data['unique_ports']}  (z-score: {data['z_score']}, threshold: {ANOMALY_Z_THRESHOLD})",
+                    f"     MITRE     : T1046 -- Network Service Scanning",
+                ]
+        else:
+            lines.append(" [OK] No statistical deviations from baseline detected.")
+        lines.append("")
+
     # Verdict
     action = "Escalate to Tier 2 immediately" if severity == "HIGH" else "Monitor and investigate"
     lines += [
@@ -271,6 +323,15 @@ def main():
         "--output", default="report_output.txt",
         help="Output file for the report (default: report_output.txt)"
     )
+    parser.add_argument(
+        "--baseline", nargs="?", const=BASELINE_PROFILE_FILE, default=None,
+        help=(
+            "Enable statistical anomaly detection using a baseline profile "
+            f"(default path: {BASELINE_PROFILE_FILE}, build one with "
+            "baseline_profile.py --generate). Runs alongside the fixed-"
+            "threshold rules, does not replace them."
+        )
+    )
     args = parser.parse_args()
 
     print(SEP)
@@ -280,7 +341,18 @@ def main():
     if args.generate:
         generate_sample_pcap(args.pcap)
 
-    findings = analyze_pcap(args.pcap)
+    baseline = None
+    if args.baseline:
+        try:
+            baseline = load_profile(args.baseline)
+            print(f"[+] Baseline profile loaded: {args.baseline} "
+                  f"({baseline['hosts_observed']} hosts observed)")
+        except FileNotFoundError:
+            print(f"[!] Baseline profile not found: {args.baseline}")
+            print("    Build one first: python baseline_profile.py --generate")
+            sys.exit(1)
+
+    findings = analyze_pcap(args.pcap, baseline=baseline)
     generate_report(findings, args.output)
 
 

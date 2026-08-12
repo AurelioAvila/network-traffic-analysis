@@ -1,7 +1,8 @@
 # Network Traffic Analysis — SOC Home Lab
 
 A Tier 1 SOC analyst workflow for analyzing network packet captures (PCAP),
-detecting suspicious traffic patterns, and generating structured incident reports.
+detecting suspicious traffic patterns, and generating structured incident reports
+— with both fixed-threshold rules and statistical baseline anomaly detection.
 
 > **Note:** This is a home-lab portfolio project. The sample PCAP is generated
 > synthetically for demonstration purposes.
@@ -16,14 +17,28 @@ a full packet capture analysis to identify:
 - Active port scans against internal hosts
 - Connections to known malicious or suspicious ports (C2 channels)
 - High-volume UDP floods indicating potential DoS activity
+- Statistical deviations from this specific network's normal traffic pattern
+
+## Why fixed thresholds aren't enough
+
+A rule like "50+ packets from one IP = flood" only works for the network it
+was tuned on. On a busy segment it drowns Tier 1 in false positives; on a
+quiet one, an attacker who stays just under the number gets through clean.
+This project runs both approaches side by side: fixed thresholds for
+deterministic, explainable rules, and an optional statistical baseline
+(z-score against this network's own observed normal) for the traffic
+patterns a fixed number can't adapt to. See
+[`demo_baseline_vs_fixed.py`](demo_baseline_vs_fixed.py) for a reproducible
+case where this actually changes the verdict.
 
 ## Workflow
 
 1. Generate or load a PCAP file with network traffic
 2. Parse all packets and extract source/destination IPs, ports, and protocols
-3. Apply detection logic: port scan, suspicious ports, high-volume flood
-4. Enrich findings with MITRE ATT&CK technique mapping
-5. Produce a structured verdict report
+3. Apply fixed-threshold detection: port scan, suspicious ports, high-volume flood
+4. *(optional)* Apply statistical anomaly detection against a baseline profile built from known-normal traffic
+5. Enrich findings with MITRE ATT&CK technique mapping
+6. Produce a structured verdict report
 
 ---
 
@@ -42,30 +57,37 @@ a full packet capture analysis to identify:
 - **Python 3** — packet parsing and detection logic
 - **Scapy** — PCAP generation and analysis
 - **argparse** — CLI interface
+- **statistics** (stdlib) — baseline mean/stdev and z-score computation
 
 ## Detection Logic
 
-**Port scan detection:**
-- Flags any source IP hitting 10+ unique destination ports
-- Maps to T1046 — Network Service Scanning
+**Fixed-threshold rules** (`pcap_analyzer.py`, always on):
 
-**Suspicious port detection:**
-- Monitors connections to known malicious ports:
-  `4444` (Metasploit), `1337` (backdoor), `6667` (IRC/botnet),
-  `6666`, `31337`, `9001` (Tor), `9050` (Tor SOCKS), `8888` (C2)
-- Maps to T1071 — Application Layer Protocol
+- **Port scan:** flags any source IP hitting 10+ unique destination ports → T1046
+- **Suspicious ports:** monitors connections to known malicious ports —
+  `4444` (Metasploit), `1337` (backdoor), `6667` (IRC/botnet), `6666`,
+  `31337`, `9001` (Tor), `9050` (Tor SOCKS), `8888` (C2) → T1071
+- **High volume / flood:** flags any source IP sending 50+ packets → T1498
 
-**High volume / flood detection:**
-- Flags any source IP sending 50+ packets
-- Maps to T1498 — Network Denial of Service
+**Statistical baseline mode** (`baseline_profile.py`, opt-in via `--baseline`):
+
+- Builds a per-network profile (mean + standard deviation of packets-per-host
+  and unique-ports-per-host) from a known-normal traffic capture
+- Flags any host whose packet volume or port diversity is **3+ standard
+  deviations** above that network's own baseline mean — instead of a number
+  that happened to work on a different network
+- Runs *alongside* the fixed rules, not instead of them — deterministic
+  rules stay auditable; the baseline catches what they structurally can't
 
 ## Repository Structure
 
     network-traffic-analysis/
-    ├── pcap_analyzer.py       # main analysis and detection script
-    ├── sample_capture.pcap    # synthetically generated suspicious traffic
-    ├── report_output.txt      # sample report output
-    ├── requirements.txt       # Python dependencies
+    ├── pcap_analyzer.py           # main analysis: fixed-threshold + baseline modes
+    ├── baseline_profile.py        # builds a statistical traffic baseline (mean/stdev, z-score)
+    ├── demo_baseline_vs_fixed.py  # reproducible proof: a flood the fixed threshold misses
+    ├── sample_capture.pcap        # synthetically generated suspicious traffic
+    ├── report_output.txt          # sample report output
+    ├── requirements.txt           # Python dependencies
     ├── .gitignore
     └── README.md
 
@@ -84,22 +106,36 @@ cd network-traffic-analysis
 python -m pip install scapy
 ```
 
-### 3. Generate sample PCAP and analyze
+### 3. Generate sample PCAP and analyze (fixed-threshold mode)
 
 ```bash
 python pcap_analyzer.py --generate
 ```
 
-### 4. Analyze an existing PCAP
+### 4. Analyze with statistical baseline detection
 
 ```bash
-python pcap_analyzer.py your_capture.pcap
+# Build a baseline profile from known-normal traffic (or your own capture)
+python baseline_profile.py --generate
+
+# Analyze with both fixed rules and baseline anomaly detection
+python pcap_analyzer.py sample_capture.pcap --baseline
 ```
 
-### 5. Custom output file
+### 5. See the fixed-threshold blind spot for yourself
 
 ```bash
-python pcap_analyzer.py --generate --output my_report.txt
+python demo_baseline_vs_fixed.py
+```
+
+Builds a quiet-network baseline and a flood capped deliberately under the
+fixed 50-packet threshold, runs both detection modes against it, and prints
+the verdicts side by side.
+
+### 6. Analyze your own PCAP / custom output file
+
+```bash
+python pcap_analyzer.py your_capture.pcap --baseline my_baseline.json --output my_report.txt
 ```
 
 ---
@@ -155,6 +191,45 @@ python pcap_analyzer.py --generate --output my_report.txt
  ALERTS  : 8 anomalies detected
 ======================================================================
 ```
+
+---
+
+## Proof: what the baseline catches that the fixed threshold misses
+
+Real output from `demo_baseline_vs_fixed.py`:
+
+```
+[*] Quiet-office baseline: mean 5.65 packets/host, stdev 1.73
+[*] Stealthy flood capture: attacker sends 35 packets (fixed threshold triggers at 50)
+
+----------------------------------------------------------------------
+ RESULT
+----------------------------------------------------------------------
+ Fixed-threshold mode  -> high_volume_ips flagged: 0  (needs >= 50 packets, attacker sent 35)
+ Baseline mode         -> anomaly_flood_ips flagged: 1
+   192.168.2.250: 35 packets, z-score 16.97
+
+[+] Confirmed: the fixed threshold missed this flood entirely.
+    The baseline flagged it because it's tuned to *this* network's
+    actual normal traffic, not a number that happened to work elsewhere.
+```
+
+On this quiet network, normal hosts send ~5-6 packets. An attacker sending
+35 — comfortably under the fixed 50-packet rule — is over 16 standard
+deviations above what's normal *here*. The fixed rule was silent. The
+baseline wasn't.
+
+## Limitations of the baseline approach
+
+- Needs a genuinely clean baseline capture — if the "normal" traffic used to
+  build the profile already contains an attack, the baseline learns the
+  attack as normal (classic poisoning risk for any anomaly-based system)
+- A single global per-host baseline doesn't distinguish a file server (high
+  legitimate traffic) from a workstation (low) — a production version would
+  need per-role or per-subnet baselines, not one profile for the whole network
+- z-score assumes roughly normal-ish traffic distribution; a network with
+  naturally bursty legitimate traffic (backups, batch jobs) needs a wider
+  threshold or a rolling baseline, not the static one built here
 
 ---
 
