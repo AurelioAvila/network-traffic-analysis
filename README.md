@@ -245,6 +245,7 @@ against networks or systems for which you do not have explicit authorization.
 
 | Project | Description |
 |---------|-------------|
+| [detection-engineering-rules](https://github.com/AurelioAvila/detection-engineering-rules) | YARA + Sigma detection rules validated against synthetic true/false-positive test cases |
 | [ransomware-dfir-timeline](https://github.com/AurelioAvila/ransomware-dfir-timeline) | Multi-source DFIR timeline reconstruction of a ransomware incident, MITRE-mapped, full analyst write-up |
 | [soc-home-lab](https://github.com/AurelioAvila/soc-home-lab) | End-to-end SOC lab with Wazuh + OpenSearch, MITRE-mapped detection & triage |
 | [malware-triage-hash](https://github.com/AurelioAvila/malware-triage-hash) | Python SHA256 triage via VirusTotal API + Sentinel KQL hunt rule |
