@@ -1,6 +1,6 @@
 # Network Traffic Analysis — SOC Home Lab
 
-[![CI](https://github.com/AurelioAvila/network-traffic-analysis/actions/workflows/ci.yml/badge.svg)](https://github.com/AurelioAvila/network-traffic-analysis/actions/workflows/ci.yml) [![Buy me a coffee](https://img.shields.io/badge/%E2%98%95%20Buy%20me%20a%20coffee-one--off%2C%20no%20account-FF5500?style=flat-square&labelColor=1c1c1c)](https://buy.stripe.com/28E3cvdoZdzTdRiedY9Ve00)
+[![CI](https://github.com/AurelioAvila/network-traffic-analysis/actions/workflows/ci.yml/badge.svg)](https://github.com/AurelioAvila/network-traffic-analysis/actions/workflows/ci.yml)
 
 A Tier 1 SOC analyst workflow for analyzing network packet captures (PCAP),
 detecting suspicious traffic patterns, and generating structured incident reports
