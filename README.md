@@ -145,10 +145,10 @@ python pcap_analyzer.py your_capture.pcap --baseline my_baseline.json --output m
 ## 📸 Screenshots
 
 **Part 1 — Traffic summary and port scan detection:**
-![Analysis output part 1](screenshot_output_1.png)
+![Analysis output part 1](docs/screenshots/screenshot_output_1.png)
 
 **Part 2 — C2 connections, flood detection and verdict:**
-![Analysis output part 2](screenshot_output_2.png)
+![Analysis output part 2](docs/screenshots/screenshot_output_2.png)
 
 ---
 
